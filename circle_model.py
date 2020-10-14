@@ -19,25 +19,25 @@ def cal_similarity(features):
 
 def circle_loss(y_true, y_pred):
 
-    def circle_loss_(features, labels, scale=64, margin=0.25):
+    def circle_loss_(features, labels, scale=32, margin=0.25):
         # labels: (N,cls) one-hot label
         # features: (N,k) feature embedding
         sim_mat = cal_similarity(features)
         label_mat = K.cast(labels @ K.transpose(labels), tf.bool)
-        sin_mat_p = tf.where(label_mat, sim_mat, tf.zeros_like(sim_mat))
-        sin_mat_n = tf.where(label_mat, tf.zeros_like(sim_mat), sim_mat)
+        sim_mat_p = tf.gather_nd(sim_mat, tf.where(label_mat))
+        sim_mat_n = tf.gather_nd(sim_mat, tf.where(~label_mat))
 
-        alpha_p = K.relu(1 + margin - sin_mat_p)
-        alpha_n = K.relu(sin_mat_n + margin)
+        alpha_p = K.relu(1 + margin - sim_mat_p)
+        alpha_n = K.relu(sim_mat_n + margin)
 
         delta_p = 1 - margin
         delta_n = margin
 
-        circle_loss_n = K.log(1 + K.sum(K.exp(scale*alpha_n*(sin_mat_n-delta_n))))
-        circle_loss_p = K.log(1 + K.sum(K.exp(scale*alpha_p*(sin_mat_p-delta_p))))
+        circle_loss_n = K.mean(K.exp(scale*alpha_n*(sim_mat_n-delta_n)))
+        circle_loss_p = K.mean(K.exp(-scale*alpha_p*(sim_mat_p-delta_p)))
 
-        loss = circle_loss_n - circle_loss_p
-        # loss = tf.Print(loss, [circle_loss_n, circle_loss_p])
+        loss = K.log(1 + circle_loss_n*circle_loss_p)
+        loss = tf.Print(loss, [circle_loss_n, circle_loss_p], message='  circle_loss_n & circle_loss_p')
 
         return loss
 
@@ -82,28 +82,25 @@ def circle_model(input_shape=(28,28,1)):
 if __name__ == '__main__':
 
     model = circle_model(input_shape=(28,28,1))
+    model.load_weights("circleloss_cls10_ep_39_loss_0.370.h5")
 
     # # train
     # x_train, y_train = load_training_data()
     # filepath = "circleloss_cls10_ep_{epoch:02d}_loss_{loss:.3f}.h5"
     # checkpoint = ModelCheckpoint(filepath, monitor='loss', mode='min',verbose=1, save_weights_only=True)
     # model.fit(x=x_train, y=y_train, shuffle=True,
-    #           batch_size=64, epochs=20,
+    #           batch_size=128, epochs=50,
     #           verbose=1,
     #           callbacks=[checkpoint])
 
-    # # compute center
-    # x_train, y_train = load_training_data(logits=False)
-    # center = np.zeros((10,32))
-    # for i in range(10):
-    #     x = x_train[i*500:(i+1)*500]
-    #     y_pred = model.predict([x])
-    #     center[i] = np.mean(y_pred, axis=0)
-    #     for j in range(100):
-    #         dis = np.square(np.sum((y_pred[j]-center[i])**2))
-    #         print(dis)
-
-    # np.save("center.npy", center)
+    # compute center
+    x_train, y_train = load_training_data(logits=False)
+    center = np.zeros((10,32))
+    for i in range(10):
+        x = x_train[i*500:(i+1)*500]
+        y_pred = model.predict([x])
+        center[i] = np.mean(y_pred, axis=0)
+    np.save("center.npy", center)
 
     # test
     center = np.load("center.npy")
